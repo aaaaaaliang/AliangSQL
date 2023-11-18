@@ -1,0 +1,11 @@
+注意：INSERT INTO USER (ID, NAME) VALUES (1, '阿亮');
+如遇到输入字符串请用单引号 ('') !!!!
+
+创建数据库语法: create database xxx;        // create database blog;
+使用数据库语法: use xxx;                    // use blog;
+创建表语法: create table xx (字段  类型,字段  类型); // create table user (id int,name string);
+插入语法: insert into xx (字段 , 字段) values (值,值); // insert into user (id ,name) values (1,'阿亮');
+查询语法: select * from xxx where xx = xx;      // select * from user where id = 1;
+修改语法: update xx set 字段 = 值  where 字段 = 值; //update user set name = '亮亮' where id = 1;
+删除语法: delete from xx where 字段 = 值 ;     // delete from user where id =1
+
