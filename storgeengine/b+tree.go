@@ -959,11 +959,10 @@ func (db *DB) UpdateDataToFile(tableName string, data map[string]interface{}) er
 
 func (db *DB) GetHelp() {
 
-	filePath := filepath.Join("/Users/zhangxueliang/GolandProjects/AliangSQL/tools/help.txt")
-
+	filePath := filepath.Join(db.initFilePath, "tools/help.txt")
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		fmt.Println("打开文件创建文件失败")
+		fmt.Println("打开文件创建文件失败", err)
 		return
 	}
 	defer file.Close()
@@ -973,7 +972,7 @@ func (db *DB) GetHelp() {
 		fmt.Println("os.Stat获取文件失败")
 		return
 	}
-	if fi.Size() == ' ' {
+	if fi.Size() == 0 {
 		data := []byte("创建数据库语法: create database xxx;        // create database blog;\n使用数据库语法: use xxx;                    // use blog;\n创建表语法: create table xx (字段  类型,字段  类型); // create table user (id int,name string);\n插入语法: insert into xx (字段 , 字段) values (值,值); // insert into user (id ,name) values (1,'阿亮');\n查询语法: select * from xxx where xx = xx;      // select * from user where id = 1;\n修改语法: update xx set 字段 = 值  where 字段 = 值; //update user set name = '亮亮' where id = 1;\n删除语法: delete from xx where 字段 = 值 ;     // delete from user where id =1")
 		err := os.WriteFile(filePath, data, 0644)
 		if err != nil {
