@@ -26,6 +26,11 @@ type BPNode struct {
 	Next   *BPNode   // 指针
 }
 
+type SQLResult struct {
+	Error  error
+	Result interface{} // 可以根据需要调整类型，比如 string 或者更具体的结构体
+}
+
 // 查找数据项，返回子数据项的索引
 func (node *BPNode) findItem(key int64) int {
 	num := len(node.Items)
@@ -104,8 +109,12 @@ func (node *BPNode) deleteItem(key int64) bool {
 			return false
 		} else if node.Items[i].Key == key {
 			copy(node.Items[i:], node.Items[i+1:])
-			node.Items = node.Items[0 : len(node.Items)-1]
-			node.MaxKey = node.Items[len(node.Items)-1].Key
+			node.Items = node.Items[:len(node.Items)-1]
+			if len(node.Items) > 0 {
+				node.MaxKey = node.Items[len(node.Items)-1].Key
+			} else {
+				node.MaxKey = 0 // 或者一个表示空的适当值
+			}
 			return true
 		}
 	}
@@ -460,14 +469,13 @@ type DB struct {
 }
 
 // Use 切换当前使用的数据库
-func (db *DB) Use(databaseName string) {
+func (db *DB) Use(databaseName string) SQLResult {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 
 	// 检查数据库是否存在
 	if _, exists := db.databases[databaseName]; !exists {
-		fmt.Printf("数据库 %s 不存在\n", databaseName)
-		return
+		return SQLResult{Error: fmt.Errorf("数据库 %s 不存在\n", databaseName)}
 	}
 	// 切换当前使用的数据库
 	db.currentDB = databaseName
@@ -475,7 +483,7 @@ func (db *DB) Use(databaseName string) {
 	filePath := filepath.Join(db.initFilePath, db.currentDB)
 	db.operateFilePath = filePath
 	ChangeWorkingDirectory(db.operateFilePath)
-	fmt.Println("Use是否切换成功", db.operateFilePath)
+	return SQLResult{Result: fmt.Sprintf("Use是否切换成功 %v", db.operateFilePath)}
 }
 func ChangeWorkingDirectory(path string) {
 	err := os.Chdir(path)
@@ -641,7 +649,7 @@ func (db *DB) Delete(tableName string, key int64) bool {
 	return !exists
 }
 
-func ParseSQL(sql string, db *DB) bool {
+func ParseSQL(sql string, db *DB) SQLResult {
 	sql = strings.TrimSpace(sql)
 	sql = strings.ToUpper(sql)
 	sql = strings.TrimSuffix(sql, ";")
@@ -653,51 +661,59 @@ func ParseSQL(sql string, db *DB) bool {
 	fmt.Println(words)
 	switch words[0] {
 	case "EXIT":
-		return false
+		return SQLResult{}
 	case "USE":
-		db.Use(words[1])
+		return db.Use(words[1])
 	case "HELP":
-		db.GetHelp()
+		return db.GetHelp()
 	case "CREATE":
 		if words[1] == "DATABASE" {
 			db.CreateDatabase(words[2])
 		} else if words[1] == "TABLE" {
-			//[CREATE TABLE USER ID INT NAME STRING AGE INT ;]
-			tableName := words[2]
-			// 解析表结构
-			columns := make([]Column, 0)
-			for i := 3; i < len(words); i += 2 {
-				// 检查是否有足够的单词
-				if i+1 >= len(words) {
-					fmt.Println("列定义缺少类型")
-					return true
+
+			if len(words) < 4 {
+				return SQLResult{
+					Error: fmt.Errorf("创表需要字段"),
+				}
+			} else {
+				//[CREATE TABLE USER ID INT NAME STRING AGE INT ;]
+				tableName := words[2]
+				// 解析表结构
+				columns := make([]Column, 0)
+				for i := 3; i < len(words); i += 2 {
+					// 检查是否有足够的单词
+					if i+1 >= len(words) {
+						return SQLResult{
+							Error: fmt.Errorf("列定义缺少类型"),
+						}
+					}
+
+					columnName := words[i]
+					columnType := words[i+1]
+					var colType ColumnType
+					switch columnType {
+					case "INT":
+						colType = IntType
+					case "STRING":
+						colType = StringType
+					default:
+						return SQLResult{
+							Error: fmt.Errorf("未知的字段类型: %v", columnType),
+						}
+					}
+					columns = append(columns, Column{Name: columnName, Type: colType})
 				}
 
-				columnName := words[i]
-				columnType := words[i+1]
-				var colType ColumnType
-				switch columnType {
-				case "INT":
-					colType = IntType
-				case "STRING":
-					colType = StringType
-				default:
-					fmt.Println("未知的字段类型:", columnType)
-					return true
+				// 定义表结构
+				tableSchema := TableSchema{
+					Columns: columns,
 				}
-				columns = append(columns, Column{Name: columnName, Type: colType})
+
+				// 创建表
+				db.CreateTable(tableName, tableSchema)
+				//db.CreateTableFile(tableName, tableSchema)
 			}
 
-			// 定义表结构
-			tableSchema := TableSchema{
-				Columns: columns,
-			}
-
-			// 创建表
-			db.CreateTable(tableName, tableSchema)
-			//db.CreateTableFile(tableName, tableSchema)
-		} else {
-			fmt.Println("Invalid CREATE statement.")
 		}
 	case "INSERT":
 		// [INSERT INTO USER ID NAME AGE VALUES 1 '阿亮' 22 ;]
@@ -721,8 +737,9 @@ func ParseSQL(sql string, db *DB) bool {
 			i++
 		}
 		if len(columns) != len(values) {
-			fmt.Println("列的数量和值的数量不匹配")
-			return true
+			return SQLResult{
+				Error: fmt.Errorf("列的数量和值的数量不匹配"),
+			}
 		}
 		data := make(map[string]interface{})
 		for i, column := range columns {
@@ -757,8 +774,10 @@ func ParseSQL(sql string, db *DB) bool {
 
 			// 判断是否是等号，如果不是，则语句无效
 			if i >= len(words) || words[i] != "=" {
-				fmt.Println("无效的更新表达式:", words[i-1])
-				return true
+				return SQLResult{
+					Error: fmt.Errorf("无效的更新表达式:%v", words[i-1]),
+				}
+
 			}
 			i++
 
@@ -772,8 +791,9 @@ func ParseSQL(sql string, db *DB) bool {
 
 		// 检查是否提前结束循环
 		if i >= len(words) || words[i] != "WHERE" {
-			fmt.Println("缺少 WHERE 子句")
-			return true
+			return SQLResult{
+				Error: fmt.Errorf("缺少 WHERE 子句"),
+			}
 		}
 
 		i++ // 跳过 "WHERE"
@@ -784,16 +804,20 @@ func ParseSQL(sql string, db *DB) bool {
 
 		// 判断是否是等号，如果不是，则语句无效
 		if i >= len(words) || words[i] != "=" {
-			fmt.Println("无效的 WHERE 子句")
-			return true
+
+			return SQLResult{
+				Error: fmt.Errorf("无效的 WHERE 子句"),
+			}
+
 		}
 		i++
 
 		// 获取主键值
 		key, err := strconv.ParseInt(words[i], 10, 64)
 		if err != nil {
-			fmt.Println("无效的主键值:", words[i])
-			return true
+			return SQLResult{
+				Error: fmt.Errorf("无效的主键值: %v", words[i]),
+			}
 		}
 
 		// 存储到 data 中
@@ -804,8 +828,10 @@ func ParseSQL(sql string, db *DB) bool {
 		if success {
 			fmt.Println("更新成功")
 		} else {
-			fmt.Println("更新失败")
-			return true
+			return SQLResult{
+				Error: fmt.Errorf("更新失败"),
+			}
+
 		}
 		//updateData := db.SelectAll(tableName)
 		//db.UpdateDataToFile(tableName, updateData)
@@ -818,41 +844,35 @@ func ParseSQL(sql string, db *DB) bool {
 		}
 
 		db.UpdateDataToFile(tableName, convertedData)
-
 	case "SELECT":
-		// [SELECT * FROM USER WHERE ID = 1;]
-		tableName := words[3]
-		// [SELECT * FROM USER WHERE ID = 1;]
-		key, err := strconv.ParseInt(words[7], 10, 64)
-		if err != nil {
-			fmt.Println("无效的主键值:", words[7])
-			return true
-		}
-		result := db.Select(tableName, key)
-		if result != nil {
-			// 判断是否是map，如果是就将其转变为map[string]interface{}
-			resultMap, ok := result.(map[string]interface{})
-			if !ok {
-				fmt.Println("无效的查询结果类型")
-				return true
+		if len(words) < 5 {
+			return SQLResult{
+				Error: fmt.Errorf("select语句不正确，缺少必要的参数"),
 			}
 
-			fmt.Print("结果: ")
-			for key, value := range resultMap {
-				fmt.Printf("%s: %v ", key, value)
-			}
-			fmt.Println()
 		} else {
-			fmt.Println("未查到")
+			if words[1] != "*" || words[2] != "FROM" {
+				return SQLResult{
+					Error: fmt.Errorf("select语句不正确"),
+				}
+			} else {
+				filePath := filepath.Join(words[3], words[4]+".csv")
+				s := db.readFileContent(filePath)
+				fmt.Println("select语句执行成功")
+				return SQLResult{
+					Result: s,
+				}
+			}
 		}
+
 	case "DELETE":
 		// [DELETE FROM USER WHERE ID = 2;]
 		tableName := words[2]
-		// 修正此处，将关键字改为正确的列名
 		key, err := strconv.ParseInt(words[6], 10, 64)
 		if err != nil {
-			fmt.Println("无效的主键值:", words[6])
-			return true
+			return SQLResult{
+				Error: fmt.Errorf("无效的主键值:%v", words[6]),
+			}
 		}
 		db.Delete(tableName, key)
 		//updateData := db.SelectAll(tableName)
@@ -867,9 +887,11 @@ func ParseSQL(sql string, db *DB) bool {
 
 		db.UpdateDataToFile(tableName, convertedData)
 	default:
-		fmt.Println("无效的语句")
+		return SQLResult{
+			Error: fmt.Errorf("无效的语句"),
+		}
 	}
-	return true
+	return SQLResult{}
 }
 
 func (db *DB) SaveDataToFile(tableName string, data map[string]interface{}) error {
@@ -954,37 +976,122 @@ func (db *DB) UpdateDataToFile(tableName string, data map[string]interface{}) er
 	fmt.Println("数据写入文件成功")
 	return nil
 }
+func (db *DB) GetHelp() SQLResult {
+	toolPath := filepath.Join(db.initFilePath, "tools")
+	var readFile []byte
+	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
+		err := os.MkdirAll(toolPath, os.ModePerm)
+		if err != nil {
 
-// 获取帮助信息
-
-func (db *DB) GetHelp() {
+			return SQLResult{Error: fmt.Errorf("创建文件夹失败 %v", err)}
+		}
+		fmt.Println(toolPath, "文件夹创建成功")
+	}
 
 	filePath := filepath.Join(db.initFilePath, "tools/help.txt")
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		fmt.Println("打开文件创建文件失败", err)
-		return
+		return SQLResult{Error: fmt.Errorf("打开文件夹失败 %v", err)}
 	}
 	defer file.Close()
 
 	fi, err := os.Stat(filePath)
 	if err != nil {
-		fmt.Println("os.Stat获取文件失败")
-		return
+		return SQLResult{Error: fmt.Errorf("os.Stat获取文件失败")}
 	}
 	if fi.Size() == 0 {
-		data := []byte("创建数据库语法: create database xxx;        // create database blog;\n使用数据库语法: use xxx;                    // use blog;\n创建表语法: create table xx (字段  类型,字段  类型); // create table user (id int,name string);\n插入语法: insert into xx (字段 , 字段) values (值,值); // insert into user (id ,name) values (1,'阿亮');\n查询语法: select * from xxx where xx = xx;      // select * from user where id = 1;\n修改语法: update xx set 字段 = 值  where 字段 = 值; //update user set name = '亮亮' where id = 1;\n删除语法: delete from xx where 字段 = 值 ;     // delete from user where id =1")
+		data := []byte("创建数据库语法: create database xxx;        // create database blog;\n使用数据库语法: use xxx;                    // use blog;\n创建表语法: create table xx (字段  类型,字段  类型); // create table user (id int,name string);\n插入语法: insert into xx (字段 , 字段) values (值,值); // insert into user (id ,name) values (1,'阿亮');\n查询语法: select * from 数据库名 表名;      // select * from  blog user;\n修改语法: update xx set 字段 = 值  where 字段 = 值; //update user set name = '亮亮' where id = 1;\n删除语法: delete from xx where 字段 = 值 ;     // delete from user where id = 1;")
 		err := os.WriteFile(filePath, data, 0644)
 		if err != nil {
-			fmt.Println("os.WriteFile 写入文件出错")
-			return
+			return SQLResult{Error: fmt.Errorf("os.WriteFile 写入文件出错")}
 		}
 	} else {
-		readFile, err := os.ReadFile(filePath)
+		readFile, err = os.ReadFile(filePath)
 		if err != nil {
-			fmt.Println("ReadFile出错")
-			return
+			return SQLResult{Error: fmt.Errorf("ReadFile出错")}
 		}
 		fmt.Println(string(readFile))
 	}
+	return SQLResult{Result: string(readFile)}
 }
+
+func (db *DB) readFileContent(filePath string) string {
+	laPath := filepath.Join(db.initFilePath, "/", filePath)
+	file, err := os.ReadFile(laPath)
+	if err != nil {
+		fmt.Println("readFileContent读取出错", err)
+	}
+	fmt.Println(string(file))
+	return string(file)
+}
+
+//// [SELECT * FROM USER WHERE ID = 1;]
+//tableName := words[3]
+//// [SELECT * FROM USER WHERE ID = 1;]
+//key, err := strconv.ParseInt(words[7], 10, 64)
+//if err != nil {
+//	fmt.Println("无效的主键值:", words[7])
+//	return true
+//}
+//result := db.Select(tableName, key)
+//if result != nil {
+//	// 判断是否是map，如果是就将其转变为map[string]interface{}
+//	resultMap, ok := result.(map[string]interface{})
+//	if !ok {
+//		fmt.Println("无效的查询结果类型")
+//		return true
+//	}
+//
+//	fmt.Print("结果: ")
+//	for key, value := range resultMap {
+//		fmt.Printf("%s: %v ", key, value)
+//	}
+//	fmt.Println()
+//} else {
+//	fmt.Println("未查到")
+//}
+// [SELECT * FROM My USER]
+// 在解析 SQL 语句之前检查切片长度
+
+// 获取帮助信息
+
+//func (db *DB) GetHelp() {
+//	if _, err := os.Stat(db.initFilePath); os.IsNotExist(err) {
+//		toolPath := filepath.Join(db.initFilePath, "tools")
+//		err := os.MkdirAll(toolPath, os.ModePerm)
+//		if err != nil {
+//			fmt.Println("创建文件夹失败", err)
+//			return
+//		}
+//		fmt.Println(toolPath, "文件夹创建成功")
+//	}
+//
+//	filePath := filepath.Join(db.initFilePath, "tools/help.txt")
+//	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
+//	if err != nil {
+//		fmt.Println("打开文件创建文件失败", err)
+//		return
+//	}
+//	defer file.Close()
+//
+//	fi, err := os.Stat(filePath)
+//	if err != nil {
+//		fmt.Println("os.Stat获取文件失败")
+//		return
+//	}
+//	if fi.Size() == 0 {
+//		data := []byte("创建数据库语法: create database xxx;        // create database blog;\n使用数据库语法: use xxx;                    // use blog;\n创建表语法: create table xx (字段  类型,字段  类型); // create table user (id int,name string);\n插入语法: insert into xx (字段 , 字段) values (值,值); // insert into user (id ,name) values (1,'阿亮');\n查询语法: select * from 数据库名 表名;      // select * from user my user;\n修改语法: update xx set 字段 = 值  where 字段 = 值; //update user set name = '亮亮' where id = 1;\n删除语法: delete from xx where 字段 = 值 ;     // delete from user where id =1")
+//		err := os.WriteFile(filePath, data, 0644)
+//		if err != nil {
+//			fmt.Println("os.WriteFile 写入文件出错")
+//			return
+//		}
+//	} else {
+//		readFile, err := os.ReadFile(filePath)
+//		if err != nil {
+//			fmt.Println("ReadFile出错")
+//			return
+//		}
+//		fmt.Println(string(readFile))
+//	}
+//}

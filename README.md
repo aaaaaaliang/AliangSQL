@@ -15,7 +15,7 @@
 2.已实现基本的CURD操作，使用控制台SQL：
   <ol type="i">
   <li>插入语法: `insert into xx (字段 , 字段) values (值,值);` // insert into user (id ,name) values (1,'阿亮');</li>
-  <li>查询语法: `select * from xxx where xx = xx;`      // select from user where id = 1;</li>
+  <li>查询语法: `select * from 数据库名 表名;`      // select from user my user;</li>
   <li>修改语法: `update xx set 字段 = 值  where 字段 = 值;` //update user set name = '亮亮' where id = 1;</li>
   <li>删除语法: `delete from xx where 字段 = 值 ;`     // delete from user where id =1</li>
 </ol>
