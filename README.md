@@ -14,10 +14,13 @@
 1.使用go开发；
 2.已实现基本的CURD操作，使用控制台SQL：
   <ol type="i">
-  <li>插入语法: `insert into xx (字段 , 字段) values (值,值);` // insert into user (id ,name) values (1,'阿亮');</li>
-  <li>查询语法: `select * from 数据库名 表名;`      // select from user my user;</li>
-  <li>修改语法: `update xx set 字段 = 值  where 字段 = 值;` //update user set name = '亮亮' where id = 1;</li>
-  <li>删除语法: `delete from xx where 字段 = 值 ;`     // delete from user where id =1</li>
+     <li>使用数据库语法: use xxx;                    // use blog;</li>
+     <li>创建表语法: create table xx (字段  类型,字段  类型); // create table user (id int,name string);</li>
+     <li>插入语法: insert into xx (字段 , 字段) values (值,值); // insert into user (id ,name) values (1,'阿亮');</li>
+     <li>查询语法: select * from 数据库名 表名;      // select * from  blog user;</li>
+     <li>修改语法: update xx set 字段 = 值  where 字段 = 值; //update user set name = '亮亮' where id = 1;</li>
+     <li>删除语法: delete from xx where 字段 = 值 ;     // delete from user where id = 1;</li>
+
 </ol>
 
 
@@ -29,7 +32,7 @@
 
 主要开发步骤
 <ol>
-  <li>创建一个控制台对话交互程序（REPL：read-execute-print loop）；</li>
+  <li>创建一个控制台对话交互程序； </li>
   <li>创建一个简单的词法分析器用来解析SQL语句；</li>
   <li>编写CURD函数实现数据库的增删改查操作；</li>
   <li>创建一个B+树索引引擎，进行数据库的索引和磁盘读写操作，数据表将以.csv文件存储。</li>
